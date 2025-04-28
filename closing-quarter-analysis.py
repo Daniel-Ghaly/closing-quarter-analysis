@@ -3,6 +3,8 @@ import pandas as pd
 import os
 from statsmodels.stats.proportion import proportions_ztest
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import ttest_ind
 
 treatment_win_count = 0
 treatment_game_count = 0
@@ -16,16 +18,27 @@ control_game_count = 0
 q2_runs = []
 q3_runs = []
 
+treatment_favorite_odds = []
+control_favorite_odds = []
+
 data_dir = "data"
-for year in range(1997, 2024):  
-    file_path = os.path.join(data_dir, f"pbp{year}.csv")
+for year in range(2012, 2013):  
+    pbp_file_path = os.path.join(data_dir, f"pbp/pbp{year}.csv")
+    moneyline_file_path = os.path.join(data_dir, f"nba_betting_money_line.csv")
     
-    if not os.path.exists(file_path):
-        print(f"❌ Missing: {file_path}")
+    if not os.path.exists(pbp_file_path):
+        print(f"❌ Missing: {pbp_file_path}")
         continue
 
-    print(f"📂 Processing {file_path}")
-    df = pd.read_csv(file_path)
+    if not os.path.exists(moneyline_file_path):
+        print(f"❌ Missing: {moneyline_file_path}")
+        continue
+
+    pbp_df = pd.read_csv(pbp_file_path)
+    print(f"📂 Processing {pbp_file_path}")
+    moneyline_df = pd.read_csv(moneyline_file_path)
+    filtered_df = moneyline_df[moneyline_df['book_name'] == 'Pinnacle Sports']
+    df = pbp_df.merge(filtered_df, left_on='gameid', right_on='game_id', how='inner')
 
     def convert_clock_to_seconds(clock_str):
         try:
@@ -73,7 +86,7 @@ for year in range(1997, 2024):
     CONTROL_Q3_START_MAX= 720
     CONTROL_Q3_END_MIN = 480
     CONTROL_Q3_END_MAX = 540
-    CLOSE_SCORE_MAX = 3
+    SCORE_MARGIN_MAX = 16
     RUN_THRESHOLD = 7
 
     for game_id in df['gameid'].unique():
@@ -86,11 +99,10 @@ for year in range(1997, 2024):
         if q2_window.empty:
             continue
 
-        
         start_row = q2_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
         start_margin = abs(start_row['h_pts'] - start_row['a_pts'])
 
-        if (start_margin > CLOSE_SCORE_MAX):
+        if (start_margin > SCORE_MARGIN_MAX):
             continue
             
         q2 = game_df[(game_df['period'] == 2)]
@@ -99,6 +111,12 @@ for year in range(1997, 2024):
         valid_run, team_won = check_run_and_win(start_row, end_row, game_df)
         if valid_run:
             treatment_game_count += 1
+            price1 = game_df['price1'].iloc[0]
+            price2 = game_df['price2'].iloc[0]
+            if price1 < price2:
+                treatment_favorite_odds.append(game_df['price1'].iloc[0])
+            elif price2 < price1:
+                treatment_favorite_odds.append(game_df['price2'].iloc[0])
             if team_won:
                 treatment_win_count += 1    
                 
@@ -117,7 +135,7 @@ for year in range(1997, 2024):
             start_row = q2_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
             start_margin = abs(start_row['h_pts'] - start_row['a_pts'])
 
-            if (start_margin > CLOSE_SCORE_MAX):
+            if (start_margin > SCORE_MARGIN_MAX):
                 continue
 
             q2_end_window = game_df[(game_df['period'] == 2)
@@ -126,7 +144,7 @@ for year in range(1997, 2024):
             if q2_end_window.empty:
                 continue
             q2_control_count += 1
-
+            
             end_row =  q2_end_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
             q2_runs.append((start_row, end_row, game_df))
         
@@ -142,7 +160,7 @@ for year in range(1997, 2024):
             start_row = q3_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
             start_margin = abs(start_row['h_pts'] - start_row['a_pts'])
 
-            if (start_margin > CLOSE_SCORE_MAX):
+            if (start_margin > SCORE_MARGIN_MAX):
                 continue
 
             q3_end_window = game_df[(game_df['period'] == 3)
@@ -164,8 +182,33 @@ for year in range(1997, 2024):
                 valid_run, team_won = check_run_and_win(start_row, end_row, game_df)
                 if valid_run:
                     control_game_count += 1
+                    price1 = game_df['price1'].iloc[0]
+                    price2 = game_df['price2'].iloc[0]
+                    if price1 < price2:
+                        control_favorite_odds.append(game_df['price1'].iloc[0])
+                    elif price2 < price1:
+                        control_favorite_odds.append(game_df['price2'].iloc[0])
                     if team_won:
                         control_win_count += 1
+
+
+print(len(treatment_favorite_odds))
+print(len(control_favorite_odds))
+
+
+balanced_treatment = [odd for odd in treatment_favorite_odds if -600 <= odd <= -200]
+balanced_control = [odd for odd in control_favorite_odds if -600 <= odd <= -200]
+
+print(len(balanced_treatment))
+print(len(balanced_control))
+
+print(f"New Treatment Avg: {np.mean(balanced_treatment)}")
+print(f"New Control Avg:   {np.mean(balanced_control)}")
+
+
+t_stat, p_val = ttest_ind(treatment_favorite_odds, control_favorite_odds)
+print(f"T-statistic: {t_stat:.4f}, P-value: {p_val:.4f}")
+
 
 print("\n--- Results ---")
 print(f"Treatment: {treatment_win_count}/{treatment_game_count} = {treatment_win_count / treatment_game_count:.2%}")
