@@ -3,8 +3,8 @@ import pandas as pd
 import os
 from statsmodels.stats.proportion import proportions_ztest
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.stats import ttest_ind
+from scipy.stats import mannwhitneyu, shapiro
+import statsmodels.api as sm
 
 treatment_win_count = 0
 treatment_game_count = 0
@@ -21,8 +21,24 @@ q3_runs = []
 treatment_favorite_odds = []
 control_favorite_odds = []
 
+treatment_run_sizes = []
+control_run_sizes = []
+
+TREATMENT_MIN = 150    
+TREATMENT_MAX = 210
+CONTROL_Q2_START_MIN = 360
+CONTROL_Q2_START_MAX= 420
+CONTROL_Q2_END_MIN = 180
+CONTROL_Q2_END_MAX = 240
+CONTROL_Q3_START_MIN = 660
+CONTROL_Q3_START_MAX= 720
+CONTROL_Q3_END_MIN = 480
+CONTROL_Q3_END_MAX = 540
+SCORE_MARGIN_MAX = 3
+RUN_THRESHOLD = 7
+
 data_dir = "data"
-for year in range(2012, 2013):  
+for year in range(1997, 2024):  
     pbp_file_path = os.path.join(data_dir, f"pbp/pbp{year}.csv")
     moneyline_file_path = os.path.join(data_dir, f"nba_betting_money_line.csv")
     
@@ -53,7 +69,6 @@ for year in range(2012, 2013):
     df['h_pts'] = df['h_pts'].ffill()
     df['a_pts'] = df['a_pts'].ffill()
 
-    print(df.head(20))
 
     def check_run_and_win(start_row, end_row, game_df):
 
@@ -76,19 +91,6 @@ for year in range(2012, 2013):
 
         return valid_run, team_won
 
-    TREATMENT_MIN = 150    
-    TREATMENT_MAX = 210
-    CONTROL_Q2_START_MIN = 360
-    CONTROL_Q2_START_MAX= 420
-    CONTROL_Q2_END_MIN = 180
-    CONTROL_Q2_END_MAX = 240
-    CONTROL_Q3_START_MIN = 660
-    CONTROL_Q3_START_MAX= 720
-    CONTROL_Q3_END_MIN = 480
-    CONTROL_Q3_END_MAX = 540
-    SCORE_MARGIN_MAX = 16
-    RUN_THRESHOLD = 7
-
     for game_id in df['gameid'].unique():
         game_df = df[df['gameid'] == game_id]
 
@@ -110,6 +112,11 @@ for year in range(2012, 2013):
         
         valid_run, team_won = check_run_and_win(start_row, end_row, game_df)
         if valid_run:
+            h_delta = end_row['h_pts'] - start_row['h_pts']
+            a_delta = end_row['a_pts'] - start_row['a_pts']
+            run_margin = abs(h_delta - a_delta)
+            treatment_run_sizes.append(run_margin)
+
             treatment_game_count += 1
             price1 = game_df['price1'].iloc[0]
             price2 = game_df['price2'].iloc[0]
@@ -123,122 +130,99 @@ for year in range(2012, 2013):
     for game_id in df['gameid'].unique():
         game_df = df[df['gameid'] == game_id]
 
-        if q2_control_count == q3_control_count:   
+        q2_window = game_df[
+        (game_df['period'] == 2) &
+        (game_df['seconds_remaining'] > CONTROL_Q2_START_MIN) &
+        (game_df['seconds_remaining'] < CONTROL_Q2_START_MAX)]
+        if q2_window.empty:
+            continue
 
-            q2_window = game_df[
-            (game_df['period'] == 2) &
-            (game_df['seconds_remaining'] > CONTROL_Q2_START_MIN) &
-            (game_df['seconds_remaining'] < CONTROL_Q2_START_MAX)]
-            if q2_window.empty:
-                continue
+        start_row = q2_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
+        start_margin = abs(start_row['h_pts'] - start_row['a_pts'])
 
-            start_row = q2_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
-            start_margin = abs(start_row['h_pts'] - start_row['a_pts'])
+        if (start_margin > SCORE_MARGIN_MAX):
+            continue
 
-            if (start_margin > SCORE_MARGIN_MAX):
-                continue
-
-            q2_end_window = game_df[(game_df['period'] == 2)
-            & (game_df['seconds_remaining'] > CONTROL_Q2_END_MIN)
-            & (game_df['seconds_remaining'] < CONTROL_Q2_END_MAX)]
-            if q2_end_window.empty:
-                continue
-            q2_control_count += 1
-            
-            end_row =  q2_end_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
-            q2_runs.append((start_row, end_row, game_df))
+        q2_end_window = game_df[(game_df['period'] == 2)
+        & (game_df['seconds_remaining'] > CONTROL_Q2_END_MIN)
+        & (game_df['seconds_remaining'] < CONTROL_Q2_END_MAX)]
+        if q2_end_window.empty:
+            continue
+        q2_control_count += 1
         
-        else:
+        end_row =  q2_end_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
+        q2_runs.append((start_row, end_row, game_df))
+
+    for game_id in df['gameid'].unique():
+        game_df = df[df['gameid'] == game_id]
             
-            q3_window = game_df[
-            (game_df['period'] == 3) &
-            (game_df['seconds_remaining'] > CONTROL_Q3_START_MIN) &
-            (game_df['seconds_remaining'] < CONTROL_Q3_START_MAX)]
-            if q3_window.empty:
-                continue
+        q3_window = game_df[
+        (game_df['period'] == 3) &
+        (game_df['seconds_remaining'] > CONTROL_Q3_START_MIN) &
+        (game_df['seconds_remaining'] < CONTROL_Q3_START_MAX)]
+        if q3_window.empty:
+            continue
 
-            start_row = q3_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
-            start_margin = abs(start_row['h_pts'] - start_row['a_pts'])
+        start_row = q3_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
+        start_margin = abs(start_row['h_pts'] - start_row['a_pts'])
 
-            if (start_margin > SCORE_MARGIN_MAX):
-                continue
+        if (start_margin > SCORE_MARGIN_MAX):
+            continue
 
-            q3_end_window = game_df[(game_df['period'] == 3)
-            & (game_df['seconds_remaining'] > CONTROL_Q3_END_MIN)
-            & (game_df['seconds_remaining'] < CONTROL_Q3_END_MAX)]
-            if q3_end_window.empty:
-                continue
-            q3_control_count += 1
+        q3_end_window = game_df[(game_df['period'] == 3)
+        & (game_df['seconds_remaining'] > CONTROL_Q3_END_MIN)
+        & (game_df['seconds_remaining'] < CONTROL_Q3_END_MAX)]
+        if q3_end_window.empty:
+            continue
+        q3_control_count += 1
 
-            end_row =  q3_end_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
-            q3_runs.append((start_row, end_row, game_df))
+        end_row =  q3_end_window.sort_values(by="seconds_remaining", ascending=False).iloc[0]
+        q3_runs.append((start_row, end_row, game_df))
 
-            min_len = min(len(q2_runs), len(q3_runs))
-            q2_runs = random.sample(q2_runs, min_len)
-            q3_runs = random.sample(q3_runs, min_len)
-            final_control_runs = q2_runs + q3_runs
+   
+min_len = min(len(q2_runs), len(q3_runs))
+q2_runs = random.sample(q2_runs, min_len)
+q3_runs = random.sample(q3_runs, min_len)
+final_control_runs = q2_runs + q3_runs
 
-            for start_row, end_row, game_df in final_control_runs:
-                valid_run, team_won = check_run_and_win(start_row, end_row, game_df)
-                if valid_run:
-                    control_game_count += 1
-                    price1 = game_df['price1'].iloc[0]
-                    price2 = game_df['price2'].iloc[0]
-                    if price1 < price2:
-                        control_favorite_odds.append(game_df['price1'].iloc[0])
-                    elif price2 < price1:
-                        control_favorite_odds.append(game_df['price2'].iloc[0])
-                    if team_won:
-                        control_win_count += 1
+for start_row, end_row, game_df in final_control_runs:
+    valid_run, team_won = check_run_and_win(start_row, end_row, game_df)
+    if valid_run:
+        h_delta = end_row['h_pts'] - start_row['h_pts']
+        a_delta = end_row['a_pts'] - start_row['a_pts']
+        run_margin = abs(h_delta - a_delta)
+        control_run_sizes.append(run_margin)
 
-
-print(len(treatment_favorite_odds))
-print(len(control_favorite_odds))
-
-
-balanced_treatment = [odd for odd in treatment_favorite_odds if -600 <= odd <= -200]
-balanced_control = [odd for odd in control_favorite_odds if -600 <= odd <= -200]
-
-print(len(balanced_treatment))
-print(len(balanced_control))
-
-print(f"New Treatment Avg: {np.mean(balanced_treatment)}")
-print(f"New Control Avg:   {np.mean(balanced_control)}")
-
-
-t_stat, p_val = ttest_ind(treatment_favorite_odds, control_favorite_odds)
-print(f"T-statistic: {t_stat:.4f}, P-value: {p_val:.4f}")
+        control_game_count += 1
+        price1 = game_df['price1'].iloc[0]
+        price2 = game_df['price2'].iloc[0]
+        if price1 < price2:
+            control_favorite_odds.append(game_df['price1'].iloc[0])
+        elif price2 < price1:
+            control_favorite_odds.append(game_df['price2'].iloc[0])
+        if team_won:
+            control_win_count += 1
 
 
 print("\n--- Results ---")
 print(f"Treatment: {treatment_win_count}/{treatment_game_count} = {treatment_win_count / treatment_game_count:.2%}")
 print(f"Control:   {control_win_count}/{control_game_count} = {control_win_count / control_game_count:.2%}")
 
+# Perform two-sided z-test using actual counts
+successes = [treatment_win_count, control_win_count]
+nobs = [treatment_game_count, control_game_count]
 
-# Counts of successes (wins)
-successes = [6842, 10874781]
-
-# Total observations
-nobs = [8315, 13330520]
-
-# Perform two-sided z-test
-z_stat, p_value = proportions_ztest(count=successes, nobs=nobs, alternative='larger')
-
+z_stat, p_value = proportions_ztest(count=successes, nobs=nobs, alternative='two-sided')
 print(f"Z-statistic: {z_stat:.4f}")
 print(f"P-value:     {p_value:.4f}")
 
-treatment_wins = 6842
-treatment_total = 8315
-control_wins = 10874781
-control_total = 13330520
-
-# Calculate proportions
-p1 = treatment_wins / treatment_total
-p2 = control_wins / control_total
+# Calculate proportions dynamically
+p1 = treatment_win_count / treatment_game_count
+p2 = control_win_count / control_game_count
 diff = p1 - p2
 
 # Standard error for difference of proportions
-se = np.sqrt((p1 * (1 - p1)) / treatment_total + (p2 * (1 - p2)) / control_total)
+se = np.sqrt((p1 * (1 - p1)) / treatment_game_count + (p2 * (1 - p2)) / control_game_count)
 
 # Z value for 95% confidence
 z = 1.96
@@ -248,3 +232,66 @@ upper = diff + z * se
 # Print results as percentages
 print(f"Observed Difference: {diff*100:.2f}%")
 print(f"95% Confidence Interval: [{lower*100:.2f}%, {upper*100:.2f}%]")
+
+
+
+print("Treatment Favorite Odds", np.mean(treatment_favorite_odds))
+print("Control Favorite Odds", np.mean(control_favorite_odds))
+
+print("\nShapiro-Wilk Test for Normality:")
+shapiro_stat_treat, p_treat = shapiro(treatment_favorite_odds)
+print(f"Treatment: p = {p_treat:.4f} → {'Not normal' if p_treat < 0.05 else 'Normal'}")
+
+shapiro_stat_ctrl, p_ctrl = shapiro(control_favorite_odds)
+print(f"Control:   p = {p_ctrl:.4f} → {'Not normal' if p_ctrl < 0.05 else 'Normal'}")
+
+u_stat, p_val = mannwhitneyu(treatment_favorite_odds, control_favorite_odds, alternative='two-sided')
+print(f"Mann-Whitney U (odds): U = {u_stat:.4f}, p = {p_val:.4f}")
+
+
+
+
+print(f"Avg Treatment Run Size: {np.mean(treatment_run_sizes):.2f}")
+print(f"Avg Control Run Size:   {np.mean(control_run_sizes):.2f}")
+
+print("\nShapiro-Wilk Test for Normality:")
+shapiro_stat_treat, p_treat = shapiro(treatment_run_sizes)
+print(f"Treatment: p = {p_treat:.4f} → {'Not normal' if p_treat < 0.05 else 'Normal'}")
+
+shapiro_stat_ctrl, p_ctrl = shapiro(control_run_sizes)
+print(f"Control:   p = {p_ctrl:.4f} → {'Not normal' if p_ctrl < 0.05 else 'Normal'}")
+
+u_stat, p_val = mannwhitneyu(treatment_run_sizes, control_run_sizes, alternative='two-sided')
+print(f"Mann-Whitney U: {u_stat:.4f}, P-value: {p_val:.4f}")
+
+
+
+
+# Build dataset: one row per game, with outcome and run size
+wins = [1] * treatment_win_count + [0] * (treatment_game_count - treatment_win_count) + \
+       [1] * control_win_count + [0] * (control_game_count - control_win_count)
+
+run_sizes = treatment_run_sizes + control_run_sizes
+
+# Create DataFrame
+df = pd.DataFrame({
+    "win": wins,
+    "run_size": run_sizes
+})
+
+# Add constant term for intercept
+X = sm.add_constant(df["run_size"])
+y = df["win"]
+
+# Run logistic regression
+model = sm.Logit(y, X).fit()
+
+# Show results
+print(model.summary())
+
+# Optional: interpret as win rate increase per run point
+odds_ratio = np.exp(model.params["run_size"])
+print(f"\nOdds ratio per run point: {odds_ratio:.4f}")
+
+approx_win_pct_gain = (odds_ratio - 1) / (odds_ratio + 1)  # ≈ win probability boost
+print(f"Approx. win rate increase per run point: {approx_win_pct_gain*100:.2f}%")
