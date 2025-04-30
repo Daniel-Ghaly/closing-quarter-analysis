@@ -233,8 +233,6 @@ upper = diff + z * se
 print(f"Observed Difference: {diff*100:.2f}%")
 print(f"95% Confidence Interval: [{lower*100:.2f}%, {upper*100:.2f}%]")
 
-
-
 print("Treatment Favorite Odds", np.mean(treatment_favorite_odds))
 print("Control Favorite Odds", np.mean(control_favorite_odds))
 
@@ -248,9 +246,6 @@ print(f"Control:   p = {p_ctrl:.4f} → {'Not normal' if p_ctrl < 0.05 else 'Nor
 u_stat, p_val = mannwhitneyu(treatment_favorite_odds, control_favorite_odds, alternative='two-sided')
 print(f"Mann-Whitney U (odds): U = {u_stat:.4f}, p = {p_val:.4f}")
 
-
-
-
 print(f"Avg Treatment Run Size: {np.mean(treatment_run_sizes):.2f}")
 print(f"Avg Control Run Size:   {np.mean(control_run_sizes):.2f}")
 
@@ -263,8 +258,6 @@ print(f"Control:   p = {p_ctrl:.4f} → {'Not normal' if p_ctrl < 0.05 else 'Nor
 
 u_stat, p_val = mannwhitneyu(treatment_run_sizes, control_run_sizes, alternative='two-sided')
 print(f"Mann-Whitney U: {u_stat:.4f}, P-value: {p_val:.4f}")
-
-
 
 
 # Build dataset: one row per game, with outcome and run size
